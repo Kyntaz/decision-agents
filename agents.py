@@ -11,20 +11,16 @@ class Outcome:
     
     def __init__(self, name, info):
         self.name = name;
-        self.probability = 0
+        self.probability = info[0]
         self.occurrences = 0
         self.value = 0
         self.children = {}
-        if isinstance(info, dict):
-            for k in info:
-                self.children[k] = Outcome(k, info[k])
-        if isinstance(info, tuple):
-            if info[0] < 1:
-                self.probability = info[0]
-                self.value = info[1]
-            else:
-                self.occurrences = info[0]
-                self.value = info[1]
+        if isinstance(info[1], dict):
+            for k in info[1]:
+                self.children[k] = Outcome(k, info[1][k])
+        if isinstance(info[1], int) or isinstance(info[1], float):
+            if info[0] < 1: self.value = info[1]
+            else: self.value = info[1]
                 
     def is_composite(self):
         return len(self.children) > 0
@@ -39,16 +35,21 @@ class Outcome:
         else:
             has_hard_evidence = False
             comp_value = 0
+            occs = 0
             for child in self.children.values():
                 if child.is_belief():
-                    if not has_hard_evidence: comp_value += child.calculate_pondered_value()
+                    if not has_hard_evidence:
+                        comp_value += child.calculate_pondered_value()
+                        occs += child.probability
                 else:
                     if not has_hard_evidence:
                         has_hard_evidence = True
                         comp_value = child.calculate_pondered_value()
+                        occs = child.occurrences
                     else:
                         comp_value += child.calculate_pondered_value()
-            return comp_value
+                        occs += child.occurrences
+            return comp_value / occs
             
                 
 class Task:
@@ -65,16 +66,21 @@ class Task:
     def calculate_pondered_value(self):
         has_hard_evidence = False
         pond_value = 0
+        occs = 0
         for outcome in self.outcomes.values():
             if outcome.is_belief():
-                if not has_hard_evidence: pond_value += outcome.calculate_pondered_value()
+                if not has_hard_evidence:
+                    pond_value += outcome.calculate_pondered_value()
+                    occs += outcome.probability
             else:
                 if not has_hard_evidence:
                     has_hard_evidence = True
                     pond_value = outcome.calculate_pondered_value()
+                    occs = outcome.occurrences
                 else:
                     pond_value += outcome.calculate_pondered_value()
-        return pond_value        
+                    occs += outcome.occurrences
+        return pond_value / occs
             
 class Lottery:
     """
