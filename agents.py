@@ -11,16 +11,18 @@ class Outcome:
     
     def __init__(self, name, info):
         self.name = name;
-        self.probability = info[0]
         self.occurrences = 0
+        self.probability = 0
         self.value = 0
         self.children = {}
+        if info[0] < 1: self.probability = info[0]
+        else: self.occurrences = info[0]
+        
         if isinstance(info[1], dict):
             for k in info[1]:
                 self.children[k] = Outcome(k, info[1][k])
         if isinstance(info[1], int) or isinstance(info[1], float):
-            if info[0] < 1: self.value = info[1]
-            else: self.value = info[1]
+            self.value = info[1]
                 
     def is_composite(self):
         return len(self.children) > 0
@@ -125,10 +127,35 @@ class Agent:
         self.name = name
         self.lottery = lottery
         
+        
 # Single Agent Decision:
         
 class RationalAgent(Agent):
-    pass
+    """
+    Agent that decides rationaly.
+    """
+    
+    def decide(self):
+        task_values = self.lottery.calculate_pondered_values()
+        best_task = list(task_values)[0]
+        best_value = task_values[best_task]
+        for k in list(task_values)[1:]:
+            if task_values[k] > best_value:
+                best_task = k
+                best_value = task_values[k]
+        return best_task
+    
+    def observe(self, value, task_name, outcome_list):
+        task = self.lottery.tasks[task_name]
+        if not outcome_list[0] in task.outcomes:
+            task.outcomes[outcome_list[0]] = Outcome(outcome_list[0], (1, 0))
+        outcome = task.outcomes[outcome_list[0]]
+        
+        for outcome_name in outcome_list[1:]:
+            if not outcome_name in outcome.children:
+                outcome.children[outcome_name] = Outcome(outcome_name, (1, 0))
+            outcome = outcome.children[outcome_name]
+        outcome.value = value    
 
 class SafeAgent(Agent):
     pass
