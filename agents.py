@@ -145,7 +145,15 @@ class RationalAgent(Agent):
                 best_value = task_values[k]
         return best_task
     
-    def observe(self, value, task_name, outcome_list):
+    def sense(self, line):
+        line = re.sub(r"[\s+]", "", line) #trim whitespaces
+        match = re.match(r"\((?P<value>-?\d+(?:.\d+)?),(?P<outcome>[a-zA-z]\w*(?:\.[a-zA-Z]\w*)*)\)", line)
+        value = eval(match.group("value"))
+        outcome_ids = match.group("outcome").split('.')
+        self.update_observations(value, outcome_ids[0], outcome_ids[1:])
+        
+    
+    def update_observations(self, value, task_name, outcome_list):
         task = self.lottery.tasks[task_name]
         if not outcome_list[0] in task.outcomes:
             task.outcomes[outcome_list[0]] = Outcome(outcome_list[0], (1, 0))
@@ -168,7 +176,7 @@ class ConditionalAgent(Agent):
 class NashAgent(Agent):
     pass
 
-class MixedAgen(Agent):
+class MixedAgent(Agent):
     pass
 
 # ===
