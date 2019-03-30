@@ -1,118 +1,6 @@
 import re
-
-# ===
-# Internal Lottery Implementation:
-# ===
-
-class Outcome:
-    """
-    This represents an outcome from a task.
-    """
-    
-    def __init__(self, name, info):
-        self.name = name;
-        self.occurrences = 0
-        self.probability = 0
-        self.value = 0
-        self.children = {}
-        if info[0] < 1: self.probability = info[0]
-        else: self.occurrences = info[0]
-        
-        if isinstance(info[1], dict):
-            for k in info[1]:
-                self.children[k] = Outcome(k, info[1][k])
-        if isinstance(info[1], int) or isinstance(info[1], float):
-            self.value = info[1]
-                
-    def is_composite(self):
-        return len(self.children) > 0
-    
-    def is_belief(self):
-        return self.occurrences == 0
-    
-    def calculate_pondered_value(self):
-        if not self.is_composite():
-            if self.is_belief(): return self.value * self.probability
-            else: return self.value * self.occurrences
-        else:
-            has_hard_evidence = False
-            comp_value = 0
-            occs = 0
-            for child in self.children.values():
-                if child.is_belief():
-                    if not has_hard_evidence:
-                        comp_value += child.calculate_pondered_value()
-                        occs += child.probability
-                else:
-                    if not has_hard_evidence:
-                        has_hard_evidence = True
-                        comp_value = child.calculate_pondered_value()
-                        occs = child.occurrences
-                    else:
-                        comp_value += child.calculate_pondered_value()
-                        occs += child.occurrences
-            return comp_value / occs
-            
-                
-class Task:
-    """
-    This represents a task that an agent can execute.
-    """
-    
-    def __init__(self, name, info):
-        self.name = name;
-        self.outcomes = {}
-        for k in info:
-            self.outcomes[k] = Outcome(k, info[k])
-        
-    def calculate_pondered_value(self):
-        has_hard_evidence = False
-        pond_value = 0
-        occs = 0
-        for outcome in self.outcomes.values():
-            if outcome.is_belief():
-                if not has_hard_evidence:
-                    pond_value += outcome.calculate_pondered_value()
-                    occs += outcome.probability
-            else:
-                if not has_hard_evidence:
-                    has_hard_evidence = True
-                    pond_value = outcome.calculate_pondered_value()
-                    occs = outcome.occurrences
-                else:
-                    pond_value += outcome.calculate_pondered_value()
-                    occs += outcome.occurrences
-        return pond_value / occs
-            
-class Lottery:
-    """
-    This represents a lottery of actions and outcomes that may be preformed by an agent.
-    """
-    
-    def __init__(self, info):
-        self.tasks = {}
-        for k in info:
-            self.tasks[k] = Task(k, info[k])
-            
-    def calculate_pondered_values(self):
-        vals = {}
-        for k in self.tasks:
-            vals[k] = self.tasks[k].calculate_pondered_value()
-        return vals
-
-def parse_lottery(s):
-    # This is just a hack so that I don't have to waste time writting a parser for the lottery
-    # language. Please don't judge me.
-    
-    prepared_s = re.sub(r"[\s+]", "", s)
-    prepared_s = "{" + prepared_s[1:-1] + "}"
-    prepared_s = re.sub(r"\[", "{", prepared_s)
-    prepared_s = re.sub(r"\]", "}", prepared_s)
-    prepared_s = re.sub(r"\=", ":", prepared_s)
-    prepared_s = re.sub(r"[a-zA-Z]\w*(\|[a-zA-Z]\w*)*", lambda m: "\"" + m.group() + "\"", prepared_s)
-    prepared_s = re.sub(r"\d+(\.\d+)?%", lambda m: str(float(m.group()[:-1]) / 100), prepared_s)
-    structure = eval(prepared_s)
-    return Lottery(structure)
+from dependencies import pulp
+from lottery import *
 
 # ===
 # Agents Implementation:
@@ -164,10 +52,51 @@ class RationalAgent(Agent):
             if not outcome_name in outcome.children:
                 outcome.children[outcome_name] = Outcome(outcome_name, (1, 0))
             outcome = outcome.children[outcome_name]
-        outcome.value = value    
+        outcome.value = value  
 
 class SafeAgent(Agent):
-    pass
+    """
+    Avoids having a negative reward and distributes its effort
+    ammong many tasks.
+    """
+    
+    def decide(self):
+        # The agent distributes its effort ammong the tasks
+        # avoiding the possibility of having a negative
+        # reward. This equates to a linear programming
+        # problem that will be solved with PuLP, a Linear
+        # Programming solver for python.
+        
+        problem = pulp.LpProblem("DistributeEffort", pulp.LpMaximize)
+        
+        expected_reward = self.lottery.calculate_pondered_values()
+        worst_case = self.lottery.calculate_worst_cases()
+        problem_info = {}
+        obj = {}
+        non_negative = {}
+        
+        for task in self.lottery.tasks:
+            problem_info[task] = (pulp.LpVariable(task, 0, 1), expected_reward[task], worst_case[task])
+            obj[problem_info[task][0]] = expected_reward[task]
+            non_negative[problem_info[task][0]] = worst_case[task]
+            
+        non_negative_constraint = pulp.LpAffineExpression(non_negative) >= 0
+        total_value_constraint = pulp.lpSum([x[0] for x in problem_info.values()]) == 1
+        obj_func = pulp.LpAffineExpression(obj)
+        problem += non_negative_constraint
+        problem += total_value_constraint
+        problem += obj_func
+        problem.solve()
+        
+        sol = "("
+        for x in [x[0] for x in problem_info.values()]:
+            v = pulp.value(x)
+            if v > 0: sol += str(round(v,2)) +  "," + x.name + ";"
+        sol = sol[:-1] + ")"
+        return sol
+    
+    def sense(self, line):
+        pass # This one doesn't learn, so it does not need to sense.
 
 # Multi Agent Decision:
 
@@ -179,48 +108,3 @@ class NashAgent(Agent):
 
 class MixedAgent(Agent):
     pass
-
-# ===
-# Console for interaction:
-# ===
-
-class Console:
-    """
-    A class that handles interaction with the agents
-    according to the specification.
-    """
-    
-    def __init__(self):
-        self.agent = None
-        
-    def interaction_loop(self):
-        while True:
-            command = input()
-            
-            if command == "exit":
-                return
-            
-            match = re.match(r"(?P<command>^[A-Za-z](?:\w|-)*) (?P<lottery>\(.*\)) (?P<ncalls>\d+)", command)
-            agent_type = match.group("command")
-            lottery = parse_lottery(match.group("lottery"))
-            n_calls = eval(match.group("ncalls"))
-            
-            if agent_type == "decide-rational":
-                self.agent = RationalAgent(agent_type, lottery)
-            else:
-                raise ValueError("Unkown Agent Type.")
-            
-            for i in range(n_calls):
-                print(self.agent.decide())
-                result = input()
-                
-                if result == "exit":
-                    return
-                
-                self.agent.sense(result)
-                
-
-if __name__ == "__main__":
-    console = Console()
-    console.interaction_loop()
-    
